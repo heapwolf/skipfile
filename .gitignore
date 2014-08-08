@@ -1,0 +1,4 @@
+LOG
+*.sw*
+node_modules/
+
