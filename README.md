@@ -1,6 +1,9 @@
 # SYNOPSIS
 Append data, seek forward and seek backward inside a binary file.
 
+# BUILD STATUS
+[![Build Status](http://img.shields.io/travis/hij1nx/skipfile.svg?style=flat)](https://travis-ci.org/hij1nx/skipfile)
+
 # API
 ## CONSTRUCTOR
 
