@@ -132,12 +132,6 @@ Skipfile.prototype.forward = function(pos, cb) {
       function(err, bytesRead, data) {
         if (err) return cb(err);
 
-        if (tmp[0] == 0 && termcount < 3) {
-          if (++termcount == 2) {
-            return cb(null, seq || 0, pos, val || 0);
-          }
-        }
-
         if (typeof seq == 'undefined') {
           seq = varint.decode(tmp);
           if (seq) {
@@ -157,6 +151,13 @@ Skipfile.prototype.forward = function(pos, cb) {
           chunk_size = 1;
           return read(pos + bytesRead);
         }
+
+        if (tmp[0] == 0 && termcount < 3) {
+          if (++termcount == 2) {
+            return cb(null, seq || 0, pos, val || 0);
+          }
+        }
+
         read(pos + bytesRead);
       }
     )
