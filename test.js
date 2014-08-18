@@ -79,7 +79,7 @@ test('seek backward one record after a single append', function (t) {
     skip.append(rd, function(err, offset) {
       t.ok(!err, 'the file operation did not cause an error');
 
-      skip.backward(skip.size, function(err, seq, offset, val) {
+      skip.backward(skip.size - 1, function(err, seq, offset, val) {
         t.equal(val.toString().length, rd.length, 'the data retreived from position 0 was the data appended at position 0');
         rimraf('./LOG', function(err) {
           t.ok(!err, 'the log file was deleted');
@@ -158,7 +158,7 @@ test('seek backward all over multiple records until EOF', function (t) {
             t.end();
           });
         });
-      }(skip.size);
+      }(skip.size - 1);
 
     }) }) });
   });
@@ -181,7 +181,7 @@ test('append Buffer with 0 in it', function (t) {
           t.deepEqual(val, input);
           skip.forward(offset + 1, function (err, set, offset, val2) {
             t.deepEqual(val2, input2);
-            skip.backward(skip.size, function (err, seq, offset, val3) {
+            skip.backward(skip.size - 1, function (err, seq, offset, val3) {
               t.deepEqual(val3, input2);
               skip.backward(offset, function (err, seq, offset, val4) {
                 t.deepEqual(val4, input);
