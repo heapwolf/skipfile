@@ -168,27 +168,30 @@ test('append Buffer with 0 in it', function (t) {
   var input = new Buffer([0, 1, 2, 3, 4, 0])
   var input2 = new Buffer([0, 9, 8, 7, 6, 0])
 
-  var skip = Skipfile(function(err) {
-    t.ok(!err, 'the file was successfully stated and openend');
+  rimraf('./LOG', function(err) {
+    t.ok(!err, 'the log file was deleted');
 
-    skip.append(input, function(err, offset) { t.ok(!err, 'the append operation did not cause an error');
-    skip.append(input2, function(err, offset) { t.ok(!err, 'the append operation did not cause an error');
+    var skip = Skipfile(function(err) {
+      t.ok(!err, 'the file was successfully stated and openend');
 
-      skip.forward(0, function (err, seq, offset, val) {
-        t.deepEqual(val, input);
-        skip.forward(offset + 1, function (err, set, offset, val2) {
-          t.deepEqual(val2, input2);
-          skip.backward(skip.size, function (err, seq, offset, val3) {
-            t.deepEqual(val3, input2);
-            console.log('offset', offset)
-            skip.backward(offset, function (err, seq, offset, val4) {
-              t.deepEqual(val4, input);
-              t.end();
+      skip.append(input, function(err, offset) { t.ok(!err, 'the append operation did not cause an error');
+      skip.append(input2, function(err, offset) { t.ok(!err, 'the append operation did not cause an error');
+
+        skip.forward(0, function (err, seq, offset, val) {
+          t.deepEqual(val, input);
+          skip.forward(offset + 1, function (err, set, offset, val2) {
+            t.deepEqual(val2, input2);
+            skip.backward(skip.size, function (err, seq, offset, val3) {
+              t.deepEqual(val3, input2);
+              skip.backward(offset, function (err, seq, offset, val4) {
+                t.deepEqual(val4, input);
+                t.end();
+              });
             });
           });
         });
-      });
 
-    }) });
+      }) });
+    });
   });
 });
