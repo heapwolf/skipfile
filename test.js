@@ -7,7 +7,8 @@ var test = tap.test;
 // a variable length string of random-enough data
 //
 function randomData() {
-  return Math.random().toString(15).slice(Math.random()*1101)
+  // return Math.random().toString(15).slice(Math.random()*1101)
+  return new Buffer(Math.random().toString(15).slice(Math.random()*1101))
 }
 
 test('append to a new log', function (t) {

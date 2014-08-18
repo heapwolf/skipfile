@@ -184,7 +184,7 @@ Skipfile.prototype.append = function(content, cb) {
   varint.encode(content.length, buffer, pos);
   pos += len_bytes;
 
-  buffer.write(content, pos, content.length, 'binary');
+  content.copy(buffer, pos)
   pos += content.length + 1; // advance to leave null bit.
 
   varint.encode(seq, buffer, pos);
