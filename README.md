@@ -17,10 +17,11 @@ write to.
 Appends a value to the file specified in the constructor.
 
 ```javascript
+var buf = new Buffer(randomData())
 var skip = Skipfile(function(err) {
-  skip.append(randomData(), function(err, offset) {
-  });
-});
+  skip.append(buf, function(err, offset) {
+  })
+})
 ```
 
 ### forward(bytes, callback)
@@ -31,10 +32,10 @@ var skip = Skipfile(function(err) {
 
   -function forward(pos) {
     skip.forward(pos, function(err, seq, len, offset, val) {
-      if (val) forward(offset + 1);
-    });
-  }(0);
-});
+      if (val) forward(offset + 1)
+    })
+  }(0)
+})
 ```
 
 ### backward(bytes, callback)
@@ -45,10 +46,10 @@ var skip = Skipfile(function(err) {
 
   -function backward(pos) {
     skip.backward(pos, function(err, seq, len, offset, val) {
-      if (val) backward(offset);
-    });
-  }(skip.size);
-});
+      if (val) backward(offset)
+    })
+  }(skip.size - 1)
+})
 ```
 
 ### close(callback)
@@ -56,7 +57,7 @@ Closes the file descriptor opened by the constructor.
 
 ```javascript
 skip.close(function(err) {
-});
+})
 ```
 
 ## INSTANCE MEMBERS
