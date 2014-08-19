@@ -15,7 +15,7 @@ function largeRandomData() {
     .map(Math.random)
     .map(function(v) { return v.toString(15) })
     .join('')
-  return r;
+  return new Buffer(r);
 }
 
 rimraf('./LOG1', function(err) {

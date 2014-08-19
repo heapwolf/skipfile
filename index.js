@@ -23,9 +23,9 @@ var Skipfile = module.exports = function(opts, cb) {
       that.fd = fd;
       that.size = stat && stat.size || 0;
 
-      var pos = that.size || 0;
+      if (!that.size) return cb(null, that);
 
-      if (!pos) return cb(null, that);
+      var pos = that.size - 1;
 
       that.backward(pos, function(err, seq, offset, val) {
         if (err) return cb(err);
@@ -80,7 +80,7 @@ Skipfile.prototype.backward = function(pos, cb) {
         // if we have three null bits, up the chunk size
         // for a forward read of two max-size varints.
         //
-        if (termcount == 3 && !reread) {
+        if (termcount == 2 && !reread) {
           chunk_size = end - pos - 1;
           reread = true;
           return read(pos + 1);
@@ -100,7 +100,7 @@ Skipfile.prototype.backward = function(pos, cb) {
         }
 
         if (val) {
-          var offset = pos + len;
+          var offset = pos - extrabytes - 1;
           return cb(null, seq, offset > -1 ? offset : 0, tmp);
         }
 
@@ -132,12 +132,6 @@ Skipfile.prototype.forward = function(pos, cb) {
       function(err, bytesRead, data) {
         if (err) return cb(err);
 
-        if (tmp[0] == 0 && termcount < 3) {
-          if (++termcount == 2) {
-            return cb(null, seq || 0, pos, val || 0);
-          }
-        }
-
         if (typeof seq == 'undefined') {
           seq = varint.decode(tmp);
           if (seq) {
@@ -157,6 +151,13 @@ Skipfile.prototype.forward = function(pos, cb) {
           chunk_size = 1;
           return read(pos + bytesRead);
         }
+
+        if (tmp[0] == 0 && termcount < 3) {
+          if (++termcount == 2) {
+            return cb(null, seq || 0, pos, val || 0);
+          }
+        }
+
         read(pos + bytesRead);
       }
     )
@@ -184,7 +185,7 @@ Skipfile.prototype.append = function(content, cb) {
   varint.encode(content.length, buffer, pos);
   pos += len_bytes;
 
-  buffer.write(content, pos, content.length, 'binary');
+  content.copy(buffer, pos)
   pos += content.length + 1; // advance to leave null bit.
 
   varint.encode(seq, buffer, pos);
