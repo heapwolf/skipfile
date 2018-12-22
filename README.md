@@ -1,63 +1,63 @@
 # SYNOPSIS
-Append data, seek forward and seek backward inside a binary file.
+Append only binary data file store.
 
-# BUILD STATUS
-[![Build Status](http://img.shields.io/travis/hij1nx/skipfile.svg?style=flat)](https://travis-ci.org/hij1nx/skipfile)
+# FORMAT
+Each block consists of a `sequence` (index), a `length` (length) and a
+chunk of variable length of data. Because of this, only the sequence and
+length need to be read, making it possible to "skip" through the file to
+find a specific sequence. Both sequence and length are encoded as varints.
+
+```
+[SEQUENCE][LENGTH][DATA...]...
+```
 
 # API
 ## CONSTRUCTOR
 
-Using `new Skipfile()` or `Skipfile()` will create a new 
-instance. The constructor accepts an options object. 
-`{ filename: path }` specifies the target file to read and 
-write to.
+The constructor accepts an options object. `{ filename: path }` specifies the
+target file to read and write to.
+
+```js
+const { err, handle } = await new Skipfile()
+```
 
 ## INSTANCE METHODS
-### append(value, callback)
+Instance methods do not throw, they return an object which may contain `{ err }`.
+
+### async append(value)
 Appends a value to the file specified in the constructor.
 
-```javascript
-var buf = new Buffer(randomData())
-var skip = Skipfile(function(err) {
-  skip.append(buf, function(err, offset) {
-  })
-})
+```js
+const { err, bytesWritten } = await handle.append(Buffer.from('Hello, world'))
 ```
 
-### forward(bytes, callback)
-Seeks forward from `bytes`.
+### async next(bytes)
+Iterate forward.
 
-```javascript
-var skip = Skipfile(function(err) {
+```js
+while (true) {
+  const { err, buffer, index } = await handle.next()
 
-  -function forward(pos) {
-    skip.forward(pos, function(err, seq, len, offset, val) {
-      if (val) forward(offset + 1)
-    })
-  }(0)
-})
+  if (err || !buffer) {
+    break
+  }
+
+  console.log(buffer.toString())
+}
 ```
 
-### backward(bytes, callback)
-Seeks backward from `bytes`.
+### async seek(index)
+TODO
 
-```javascript
-var skip = Skipfile(function(err) {
-
-  -function backward(pos) {
-    skip.backward(pos, function(err, seq, len, offset, val) {
-      if (val) backward(offset)
-    })
-  }(skip.size - 1)
-})
+```js
+const { err, buffer } = await handle.seek(index)
 ```
 
-### close(callback)
+### async close()
 Closes the file descriptor opened by the constructor.
 
 ```javascript
-skip.close(function(err) {
-})
+await skip.close()
 ```
 
 ## INSTANCE MEMBERS

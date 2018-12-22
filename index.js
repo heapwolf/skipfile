@@ -1,202 +1,141 @@
-var fs = require('fs');
-var varint = require('varint');
+const fs = require('fs')
+const path = require('path')
+const varint = require('varint')
+const { promisify } = require('util')
 
-var Skipfile = module.exports = function(opts, cb) {
+const stat = promisify(fs.stat)
+const open = promisify(fs.open)
+const write = promisify(fs.write)
+const read = promisify(fs.read)
 
-  if (!(this instanceof Skipfile)) {
-    return new Skipfile(opts, cb);
+module.exports = class Skipfile {
+  constructor (opts = {}) {
+    this.filename = opts.filename || path.join(process.cwd(), 'LOG')
   }
 
-  if (typeof opts == 'function') {
-    cb = opts;
-    opts = {};
+  async then (resolve) {
+    let stats = null
+
+    try {
+      stats = await stat(this.filename)
+    } catch (_) {}
+
+    try {
+      this.fd = await open(this.filename, 'a+')
+    } catch (err) {
+      return resolve({ err })
+    }
+
+    this.index = 0
+    this.pos = 0
+    this.size = (stats && stats.size) || 0
+
+    resolve({ handle: this })
   }
 
-  var that = this;
-  this.filename = opts.filename || './LOG';
+  close () {
+    const that = this
 
-  fs.stat(that.filename, function(err, stat) {
-
-    fs.open(that.filename, 'a+', function(err, fd) {
-      if (err) return cb(err);
-
-      that.fd = fd;
-      that.size = stat && stat.size || 0;
-
-      if (!that.size) return cb(null, that);
-
-      var pos = that.size - 1;
-
-      that.backward(pos, function(err, seq, offset, val) {
-        if (err) return cb(err);
-
-        that.seq = seq;
-        that.len = val.toString().length;
-        cb(null, that);
-      });
-    });
-  });
-};
-
-Skipfile.prototype.close = function(cb) {
-  fs.close(this.fd, cb);
-};
-
-Skipfile.prototype.backward = function(pos, cb) {
-
-  var that = this;
-
-  var seq_buf = new Buffer(8);
-  var len_buf = new Buffer(8);
-
-  seq_buf.fill(0x00);
-  len_buf.fill(0x00);
-
-  var offset = 0;
-  var chunk_size = 1;
-  var termcount = 0;
-  var extrabytes = 0;
-  var reread;
-  var end = pos;
-
-  var seq;
-  var len;
-  var val;
-
-  (function read(pos) {
-
-    var tmp = new Buffer(chunk_size);
-    tmp.fill(0x00);
-
-    fs.read(that.fd, tmp, offset, chunk_size, pos,
-      function(err, bytesRead, data) {
-        if (err) return cb(err);
-
-        if (tmp[0] == 0 && pos != 0) {
-          termcount++;
-        }
-
-        //
-        // if we have three null bits, up the chunk size
-        // for a forward read of two max-size varints.
-        //
-        if (termcount == 2 && !reread) {
-          chunk_size = end - pos - 1;
-          reread = true;
-          return read(pos + 1);
-        }
-
-        if (reread && !val) {
-          seq = varint.decode(tmp);
-          extrabytes += varint.decode.bytes
-          len = varint.decode(tmp, varint.decode.bytes)
-          extrabytes += varint.decode.bytes
-
-          if (len) {
-            val = true;
-            chunk_size = len;
-            return read(pos - len - 1);
-          }
-        }
-
-        if (val) {
-          var offset = pos - extrabytes - 1;
-          return cb(null, seq, offset > -1 ? offset : 0, tmp);
-        }
-
-        pos == 0 ? cb(null) : read(pos - 1);
+    return {
+      then (resolve) {
+        fs.close(that.fd, err => resolve({ err }))
       }
-    );
-  }(pos));
-};
+    }
+  }
 
-Skipfile.prototype.forward = function(pos, cb) {
+  async next ({ chunkSize = 8 } = {}) {
+    if (this.pos + 1 === this.size) return {}
 
-  if (pos + 1 == this.size) return;
-  
-  var that = this;
-  var offset = 0;
-  var chunk_size = 8;
-  var termcount = 0;
+    let extrabytes = 0
+    let buffer = null
 
-  var seq;
-  var len;
-  var val;
+    let index
+    let len
 
-  (function read(pos) {
+    while (true) {
+      const tmp = Buffer.alloc(chunkSize)
+      tmp.fill(0x00)
 
-    var tmp = new Buffer(chunk_size);
-    tmp.fill(0x00);
+      const args = [this.fd, tmp, 0, chunkSize, this.pos]
+      let bytesRead = 0
 
-    fs.read(that.fd, tmp, offset, chunk_size, pos,
-      function(err, bytesRead, data) {
-        if (err) return cb(err);
-
-        if (typeof seq == 'undefined') {
-          seq = varint.decode(tmp);
-          if (seq) {
-            return read(pos + varint.decode.bytes);
-          }
-        }
-        else if (typeof len == 'undefined') {
-          len = varint.decode(tmp);
-          if (len) {
-            chunk_size = len;
-            return read(pos + varint.decode.bytes);
-          }
-        }
-        else if (!val) {
-          val = new Buffer(len);
-          tmp.copy(val, 0, 0, tmp.length);
-          chunk_size = 1;
-          return read(pos + bytesRead);
-        }
-
-        if (tmp[0] == 0 && termcount < 3) {
-          if (++termcount == 2) {
-            return cb(null, seq || 0, pos, val || 0);
-          }
-        }
-
-        read(pos + bytesRead);
+      try {
+        const r = await read(...args)
+        bytesRead = r.bytesRead
+      } catch (err) {
+        return { err }
       }
-    )
-  }(pos));
-};
 
-Skipfile.prototype.append = function(content, cb) {
+      if (!buffer) {
+        buffer = tmp
+      } else {
+        const l = buffer.length + tmp.length
+        buffer = Buffer.concat([buffer, tmp], l)
+      }
 
-  var that = this;
-  var seq = this.seq = (this.seq || 0) + 1;
+      if (typeof index === 'undefined') {
+        index = varint.decode(tmp)
 
-  var seq_bytes = varint.encodingLength(seq);
-  var len_bytes = varint.encodingLength(content.length);
-  var nul_bytes = 2; // bit on the end, between content and terminating bits.
+        if (index) {
+          const bytes = varint.decode.bytes
+          extrabytes += bytes
+          this.pos += bytes
+          continue
+        }
+      }
 
-  var size = (seq_bytes * 2) + (len_bytes * 2) + content.length + nul_bytes;
-  var buffer = new Buffer(size);
-  var pos = 0;
+      if (typeof index !== 'undefined' && typeof len === 'undefined') {
+        len = varint.decode(tmp)
 
-  buffer.fill(0x00);
+        if (len) {
+          const bytes = varint.decode.bytes
+          chunkSize = len
+          extrabytes += bytes
+          this.pos += bytes
+          continue
+        }
+      }
 
-  varint.encode(seq, buffer, pos);
-  pos = seq_bytes;
+      this.pos += bytesRead
 
-  varint.encode(content.length, buffer, pos);
-  pos += len_bytes;
+      const nodata = bytesRead === 0
+      const full = index && len && (buffer.length >= len)
 
-  content.copy(buffer, pos)
-  pos += content.length + 1; // advance to leave null bit.
+      if (nodata || full) {
+        const slice = buffer.slice(extrabytes, len + extrabytes)
 
-  varint.encode(seq, buffer, pos);
-  pos += seq_bytes;
+        return {
+          index: index || 0,
+          buffer: slice,
+          length: len || 0
+        }
+      }
+    }
+  }
 
-  varint.encode(content.length, buffer, pos);
-  pos += len_bytes;
+  async append (content) {
+    const index = this.index += 1
 
-  fs.write(this.fd, buffer, 0, buffer.length, this.size, function(err, bytesWritten) {
-    that.size += bytesWritten;
-    cb(err);
-  });
-};
+    const indexBytes = varint.encodingLength(index)
+    const lenBytes = varint.encodingLength(content.length)
 
+    const marker = Buffer.alloc(indexBytes + lenBytes)
+    varint.encode(index, marker, 0)
+    varint.encode(content.length, marker, varint.encode.bytes)
+
+    const len = marker.length + content.length
+    content = Buffer.concat([marker, content], len)
+
+    let r
+
+    try {
+      r = await write(this.fd, content, 0, content.length, this.size)
+    } catch (err) {
+      return { err }
+    }
+
+    this.size += r.bytesWritten
+
+    return r
+  }
+}

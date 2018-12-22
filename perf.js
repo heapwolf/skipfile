@@ -1,53 +1,67 @@
-var benchmark = require('async-benchmark');
+var benchmark = require('async-benchmark')
 
-var Skipfile = require('./index');
-var rimraf = require('rimraf');
-var fs = require('fs');
+var Skipfile = require('./index')
+var rimraf = require('rimraf')
+var fs = require('fs')
+const crypto = require('crypto')
+const { promisify } = require('util')
+
+const open = promisify(fs.open)
 
 //
-// a basic perf test to be sure that skipfile isn't 
+// a basic perf test to be sure that skipfile isn't
 // too much slower than just a basic file append.
 //
 
-function largeRandomData() {
-  var r = Array
-    .apply(null, new Array(952))
-    .map(Math.random)
-    .map(function(v) { return v.toString(15) })
-    .join('')
-  return new Buffer(r);
+try {
+  rimraf.sync('./LOG')
+} catch (err) {
 }
 
-rimraf('./LOG1', function(err) {
+async function main () {
+  // make a 5Gb file
+  const ld = Buffer.from(crypto.prng(1024 * 1024).toString('hex'))
 
-  var ld = largeRandomData();
-  var size = 0;
-  var skip = Skipfile({ filename: './LOG1' }, function(err) {
+  let size = 0
 
-    var file = fs.open('./LOG2', 'r+', function(err, fd) {
+  const { err, handle } = await new Skipfile({ filename: './LOG1' })
 
-      benchmark('skipfile append', 
-        function(done) {
-          skip.append(ld, done);
-        }, 
-        function(err, event) {
-          console.log(event.target.toString());
+  if (err) throw err
 
-          benchmark('fs append', 
-            function(done) {
-              skip.append(ld, done);
-            }, 
-            function(err, event) {
-              console.log(event.target.toString());
+  let fd = null
 
-              var b = new Buffer(ld);
-              size += ld.length;
-              fs.write(fd, b, 0, b.length, size, function() {});
-            }
-          );
+  try {
+    fd = await open('./LOG2', 'a+')
+  } catch (err) {
+    throw err
+  }
+
+  benchmark('skipfile append',
+    async function (done) {
+      await handle.append(ld)
+      done()
+    },
+    function (err, event) {
+      if (err) throw err
+
+      console.log(event.target.toString())
+
+      benchmark('fs append',
+        async function (done) {
+          await handle.append(ld)
+          done()
+        },
+        async function (err, event) {
+          if (err) throw err
+          console.log(event.target.toString())
+
+          var b = Buffer.from(ld)
+          size += ld.length
+          fs.write(fd, b, 0, b.length, size, function () {})
         }
-      );
-    });
-  });
-});
+      )
+    }
+  )
+}
 
+main()

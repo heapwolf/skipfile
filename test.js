@@ -1,197 +1,126 @@
-var Skipfile = require('./index.js');
-var tap = require('tap');
-var rimraf = require('rimraf');
-var test = tap.test;
+const Skipfile = require('./index.js')
+const test = require('tape')
+const rimraf = require('rimraf')
+const varint = require('varint')
 
 //
 // a variable length string of random-enough data
 //
-function randomData() {
-  // return Math.random().toString(15).slice(Math.random()*1101)
-  return new Buffer(Math.random().toString(15).slice(Math.random()*1101))
+function randomData () {
+  return Buffer.from('ABCDEF00'.repeat(Math.max(1, Math.random() * 1024)))
 }
 
-test('append to a new log', function (t) {
+test('sanity', async t => {
+  const index = 100
+  const str = 'hello, world'
 
- var rd = randomData();
+  let buffer = Buffer.from(str)
 
-  rimraf('./LOG', function(err) {
+  const marker = Buffer.alloc(varint.encodingLength(index) + varint.encodingLength(buffer.length))
+  varint.encode(index, marker, 0)
+  varint.encode(buffer.length, marker, 1)
 
-    var skip = Skipfile(function(err) {
-      t.ok(!err, 'the file was successfully stated and opened');
-      t.ok(skip.fd, 'a file descriptor was added to the instance');
-      t.equal(skip.size, 0, 'the file could not be found, but was created and its initial size is 0');
+  buffer = Buffer.concat([marker, buffer], marker.length + buffer.length)
 
-      skip.append(rd, function(err, offset) {
-        t.ok(!err, 'the file operation did not cause an error');
-        t.end();
-      });
-    });
-  });
-});
+  {
+    const index = varint.decode(buffer, 0)
+    let markerlen = varint.decode.bytes
 
-test('append to an existing log', function (t) {
+    const len = varint.decode(buffer, 1)
+    markerlen += varint.decode.bytes
 
-  var rd = randomData();
+    t.equal(index, 100)
+    t.equal(len, 12)
+    const start = markerlen
+    const end = len + markerlen
+    const actual = buffer.slice(start, end).toString()
+    t.equal(actual, str)
+  }
 
-  var skip = Skipfile(function(err) {
-    t.ok(!err, 'the file was successfully stated and opened');
-    t.ok(skip.fd, 'a file descriptor was added to the instance');
+  t.end()
+})
 
-    skip.append(rd, function(err, offset) {
-      t.ok(!err, 'the file operation did not cause an error');
-      rimraf('./LOG', function(err) {
-        t.ok(!err, 'the log file was deleted');
-        t.end();
-      });
-    });
-  });
-});
+test('append and move forward one block', async t => {
+  try {
+    rimraf.sync('./LOG')
+  } catch (err) {
+  }
 
-test('seek forward one record after a single append', function (t) {
+  const rd = randomData()
 
-  var rd = randomData();
+  const { err, handle } = await new Skipfile()
+  t.ok(!err, 'the file was successfully stated and opened')
 
-  var skip = Skipfile(function(err) {
-    t.ok(!err, 'the file was successfully stated and opened');
+  {
+    const { err } = await handle.append(rd)
+    t.ok(!err, 'the file operation did not cause an error')
+  }
 
-    skip.append(rd, function(err, offset) {
-      t.ok(!err, 'the file operation did not cause an error');
+  {
+    const { err, buffer, length } = await handle.next()
+    t.ok(!err, 'the file operation did not cause an error')
+    t.equal(length, rd.length)
+    t.equal(rd.length, buffer.length)
+    t.end()
+  }
+})
 
-      skip.forward(0, function(err, seq, offset, val) {
-        t.equal(val.toString().length, rd.length, 'the data retreived from position 0 was the data appended at position 0');
-        rimraf('./LOG', function(err) {
-          t.ok(!err, 'the log file was deleted');
-          t.end();
-        });
-      });
-    });
-  });
-});
+//
+// This test demonstrates that any number of blocks of variable
+// Size can be added and then traversed correctly.
+//
+test('append mutliple and move forward multiple', async t => {
+  try {
+    rimraf.sync('./LOG')
+  } catch (err) {
+  }
 
-test('seek backward one record after a single append', function (t) {
+  let total = 0
 
-  var rd = randomData();
+  const items = Array(Math.max(16, Math.floor(Math.random() * 1024)))
+    .fill(0x00)
+    .map(n => {
+      const r = randomData()
+      total += r.length
+      return r
+    })
 
-  var skip = Skipfile(function(err) {
-    t.ok(!err, 'the file was successfully stated and opened');
+  const { err, handle } = await new Skipfile()
+  t.ok(!err, 'the file was successfully stated and opened')
 
-    skip.append(rd, function(err, offset) {
-      t.ok(!err, 'the file operation did not cause an error');
+  {
+    console.time('append')
 
-      skip.backward(skip.size - 1, function(err, seq, offset, val) {
-        t.equal(val.toString().length, rd.length, 'the data retreived from position 0 was the data appended at position 0');
-        rimraf('./LOG', function(err) {
-          t.ok(!err, 'the log file was deleted');
-          t.end();
-        });
-      });
-    });
-  });
-});
+    let i = 0
 
-test('seek forward all over multiple records until EOF', function (t) {
+    while (true) {
+      const item = items[i++]
+      if (!item) break
+      const { err } = await handle.append(item)
+      t.ok(!err, 'the file operation did not cause an error')
+    }
+    console.timeEnd('append')
+  }
 
-  var rd1 = randomData();
-  var rd2 = randomData();
-  var rd3 = randomData();
+  {
+    console.time('scan')
+    let i = 0
 
-  var skip = Skipfile(function(err) {
-    t.ok(!err, 'the file was successfully stated and opened');
+    while (true) {
+      const item = items[i++]
+      if (!item) break
 
-    skip.append(rd1, function(err, offset) { t.ok(!err, 'the append operation did not cause an error');
-    skip.append(rd2, function(err, offset) { t.ok(!err, 'the append operation did not cause an error');
-    skip.append(rd3, function(err, offset) { t.ok(!err, 'the append operation did not cause an error');
+      const { buffer, index, length } = await handle.next()
+      t.ok(index > i - 1, `indexuence ${index}`)
+      t.equal(length, item.length)
+      t.equal(item.length, buffer.length)
+    }
 
-      var sequences = [];
+    console.log('')
+    console.timeEnd('scan')
+    console.log('done: %s items, %s total length', items.length, total)
+    await handle.close()
+  }
 
-      -function forward(pos) {
-        skip.forward(pos, function(err, seq, offset, val) {
-          t.ok(!err, 'the forward seek operation did not cause an error');
-          if (val) {
-            sequences.push(seq);
-            return forward(offset + 1);
-          }
-          t.equal(sequences.length, 3, 'three sequence numbers were found');
-          t.equal(sequences[0], 1, 'the first sequence is 1');
-          t.equal(sequences[1], 2, 'the first sequence is 2');
-          t.equal(sequences[2], 3, 'the first sequence is 3');
-          rimraf('./LOG', function(err) {
-            t.ok(!err, 'the log file was deleted');
-            t.end();
-          });
-        });
-      }(0);
-
-    }) }) });
-  });
-});
-
-test('seek backward all over multiple records until EOF', function (t) {
-
-  var rd1 = randomData();
-  var rd2 = randomData();
-  var rd3 = randomData();
-
-  var skip = Skipfile(function(err) {
-    t.ok(!err, 'the file was successfully stated and opened');
-
-    skip.append(rd1, function(err, offset) { t.ok(!err, 'the append operation did not cause an error');
-    skip.append(rd2, function(err, offset) { t.ok(!err, 'the append operation did not cause an error');
-    skip.append(rd3, function(err, offset) { t.ok(!err, 'the append operation did not cause an error');
-
-      var sequences = [];
-
-      -function backward(pos) {
-        skip.backward(pos, function(err, seq, offset, val) {
-          t.ok(!err, 'the forward seek operation did not cause an error');
-          if (val) {
-            sequences.push(seq);
-            return backward(offset);
-          }
-          t.equal(sequences.length, 3, 'three sequence numbers were found');
-          t.equal(sequences[0], 3, 'the first sequence is 1');
-          t.equal(sequences[1], 2, 'the first sequence is 2');
-          t.equal(sequences[2], 1, 'the first sequence is 3');
-          rimraf('./LOG', function(err) {
-            t.ok(!err, 'the log file was deleted');
-            t.end();
-          });
-        });
-      }(skip.size - 1);
-
-    }) }) });
-  });
-});
-
-test('append Buffer with 0 in it', function (t) {
-  var input = new Buffer([0, 1, 2, 3, 4, 0])
-  var input2 = new Buffer([0, 9, 8, 7, 6, 0])
-
-  rimraf('./LOG', function(err) {
-    t.ok(!err, 'the log file was deleted');
-
-    var skip = Skipfile(function(err) {
-      t.ok(!err, 'the file was successfully stated and openend');
-
-      skip.append(input, function(err, offset) { t.ok(!err, 'the append operation did not cause an error');
-      skip.append(input2, function(err, offset) { t.ok(!err, 'the append operation did not cause an error');
-
-        skip.forward(0, function (err, seq, offset, val) {
-          t.deepEqual(val, input);
-          skip.forward(offset + 1, function (err, set, offset, val2) {
-            t.deepEqual(val2, input2);
-            skip.backward(skip.size - 1, function (err, seq, offset, val3) {
-              t.deepEqual(val3, input2);
-              skip.backward(offset, function (err, seq, offset, val4) {
-                t.deepEqual(val4, input);
-                t.end();
-              });
-            });
-          });
-        });
-
-      }) });
-    });
-  });
-});
+  t.end()
+})
